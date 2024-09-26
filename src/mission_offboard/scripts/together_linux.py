@@ -10,6 +10,7 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
 from std_msgs.msg import String
+from mavros_msgs.msg import WaypointReached
 import tf
 import datetime
 import os
@@ -19,7 +20,8 @@ ture_x = input("input true_x: ")
 ture_y = input("input true_y: ")
 
 # 全局变量
-stop_flag = Float64()
+stop_flag = False
+wp = 0
 # ----------------------------------------------------------------------
 # 定义相关矩阵
 # 相机内参矩阵
@@ -112,8 +114,8 @@ classes_names = {0: '00', 1: '01', 2: '02', 3: '03', 4: '04', 5: '05', 6: '06', 
                  91: '91', 92: '92', 93: '93', 94: '94', 95: '95', 96: '96', 97: '97', 98: '98', 99: '99'}
 # ----------------------------------------------------------------------
 # 设置yolo识别的参数，设置为全局变量易于更改
-maxdet = 3
-max_num = 3
+maxdet = 5
+max_num = 5
 # ----------------------------------------------------------------------
 # 加载YOLO权重(pt)文件
 MODELOBB = "./models/yolo_obb_red_blue.pt"
@@ -157,27 +159,27 @@ def auto_rotate(img):
     hsv = cv2.cvtColor(crop_img, cv2.COLOR_BGR2HSV)
 
     # 创建红色五边形的掩膜
-    # mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    # mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    # mask_red = cv2.bitwise_or(mask1, mask2)
+    mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+    mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+    mask_red = cv2.bitwise_or(mask1, mask2)
 
-    # 创建更明亮的粉色的掩膜
-    # mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
+    #创建更明亮的粉色的掩膜
+    mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
 
     # 将图像转换为HSV色彩空间
-    hsv = cv2.cvtColor(crop_img, cv2.COLOR_BGR2HSV)
+    # hsv = cv2.cvtColor(crop_img, cv2.COLOR_BGR2HSV)
     # 创建亮蓝色和暗蓝色的掩码
-    mask_dark = cv2.inRange(hsv, lower_blue_dark, upper_blue_dark)
-    mask_bright = cv2.inRange(hsv, lower_blue_bright, upper_blue_bright)
+    # mask_dark = cv2.inRange(hsv, lower_blue_dark, upper_blue_dark)
+    # mask_bright = cv2.inRange(hsv, lower_blue_bright, upper_blue_bright)
 
     # 进行形态学操作以去除噪声
-    kernel = np.ones((3, 3), np.uint8)
-    if average_brightness > 150:
-        mask = cv2.morphologyEx(mask_bright, cv2.MORPH_OPEN, kernel)  # 进行开运算（先腐蚀后膨胀）通过判断上边是白色或黑色来翻转图片
-    else:
-        mask = cv2.morphologyEx(mask_dark, cv2.MORPH_OPEN, kernel)
+    # kernel = np.ones((3, 3), np.uint8)
+    # if average_brightness > 150:
+    #     mask = cv2.morphologyEx(mask_bright, cv2.MORPH_OPEN, kernel)  # 进行开运算（先腐蚀后膨胀）通过判断上边是白色或黑色来翻转图片
+    # else:
+    #     mask = cv2.morphologyEx(mask_dark, cv2.MORPH_OPEN, kernel)
     # 将红色和粉色的掩膜合并
-    # mask = cv2.bitwise_or(mask_red, mask_pink)
+    mask = cv2.bitwise_or(mask_red, mask_pink)
 
     # 进行形态学操作以去除噪声
     kernel = np.ones((3, 3), np.uint8)
@@ -268,7 +270,7 @@ def obb_predict(frame):
         device='0',  # '0'使用GPU运行
         max_det=maxdet,
         save=False,
-        classes=0
+        classes=1
         # augment = True
     )
     return results_obb[0]
@@ -427,8 +429,10 @@ def get_middle(list):
 
 
 def stop_flag_callback(msg):
-    global stop_flag
-    stop_flag = msg.data
+    # global stop_flag
+    if msg.data==666.666:
+        stop_flag = True
+    
 
 
 def loc_pose_callback(msg):
@@ -473,6 +477,9 @@ def statistic_frequency(list):
         formatted_percentage = "{:.2f}%".format(percentage)
         print(str(empty_list[i]) + " 占比为" + str(formatted_percentage))
 
+def wp_reach_cb(msg):
+    global wp
+    wp = msg.wp_seq
 
 if __name__ == "__main__":
     rospy.init_node("vision_node")
@@ -482,27 +489,34 @@ if __name__ == "__main__":
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    result_pub = rospy.Publisher("final_result", String, queue_size=10)
-    target_pub = rospy.Publisher("final_pos",PoseStamped, 10)
+    result_pub = rospy.Publisher("final_result", String, queue_size = 10)
+    target_pub = rospy.Publisher("final_pos",PoseStamped, queue_size = 10)
+    rospy.Subscriber("/mavros/mission/reached",WaypointReached, wp_reach_cb, queue_size = 1)
+    # rospy.Subscriber('vision_stop_flag', Float64, stop_flag_callback, queue_size=10)
     frameWidth = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     frameHeight = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
     frameFps = cap.get(cv2.CAP_PROP_FPS)  # 帧率
     buffer_size = cap.get(cv2.CAP_PROP_BUFFERSIZE)
     print(frameWidth, frameHeight, frameFps, buffer_size)
     while not rospy.is_shutdown():
-
+        # print(f"{stop_flag}")                                     
         if cap.isOpened():
+            print("camera is opened")
             # print("camera is opened")
             # pose_data = rospy.wait_for_message("/mavros/global_position/local", PoseStamped, timeout=None)
             # pose_data = rospy.wait_for_message("/mavros/global_position/local", Odometry, timeout=None)
             # loc_pose_callback(pose_data)
             rospy.Subscriber("/mavros/global_position/local", Odometry, loc_pose_callback, queue_size=1)
+            print("callback is used")
             success, frame = cap.read()
             # print("frame is read")
             end_time = time.time()
-            rospy.Subscriber('send_topic', Float64, stop_flag_callback, queue_size=10)
             if success == True:
-                if (end_time - start_time > 90 or stop_flag.data == 777.777):
+                if end_time - start_time > 180:
+                    print("code exit by time")
+                    break
+                if wp == 5:
+                    print("code exit by point")
                     break
                 # print(end_time - start_time)
                 # 对畸变图像进行处理(云台畸变本身就比较小了其实)
@@ -532,7 +546,7 @@ if __name__ == "__main__":
     # print("5dateList length is: " + str(object_sum))
     middle_ = 0
     middle_2 = 0
-    middle_3 = 0  # 统计识别到的中位数的数字数量
+    middle_3 = 0 
     for k in range(0, object_sum):  # 识别到数字的有效
         if int(num_list[0]) == int(dataList[k].get_num()):
             print(num_list[0])
@@ -563,29 +577,33 @@ if __name__ == "__main__":
                 file1.write(str(cur_pos3[0]) + " " + str(cur_pos3[1]) + "\n")
             zero_pose3 += cur_pos3
             middle_3 += 1
+        
 
     final_pos = [zero_pose[0] / middle_, zero_pose[1] / middle_, zero_pose[2] / middle_]
     final_pos2 = [zero_pose2[0] / middle_2, zero_pose2[1] / middle_2, zero_pose2[2] / middle_2]
+    
     final_pos3 = [zero_pose3[0] / middle_3, zero_pose3[1] / middle_3, zero_pose3[2] / middle_3]
-    if int(middle_num) == int(num[0]):
-        real_final_pos = final_pos
-    elif int(middle_num) == int(num[1]):
-        real_final_pos = final_pos2
-    else:
-        real_final_pos = final_pos3    # 对应着飞机打点得到的坐标位置
+    # if int(middle_num) == int(num[0]):
+    #     real_final_pos = final_pos
+    # elif int(middle_num) == int(num[1]):
+    #     real_final_pos = final_pos2
+    # else:
+    #     real_final_pos = final_pos3  
+    real_final_pos = [123, 123, 123]  # 对应着飞机打点得到的坐标位置
     print("the final coordinate1 is:" + str(final_pos))
     print("the final coordinate2 is:" + str(final_pos2))
     print("the final coordinate3 is:" + str(final_pos3))
     print("the final number is" + str(most_common_four_strings(num_list)))
     print("middle_num is: " + str(middle_num))
     final_pos__=PoseStamped()
-    final_pos__.pose.position.x=np.Float64(real_final_pos[0])
-    final_pos__.pose.position.y=np.Float64(real_final_pos[1])
-    final_pos__.pose.position.z=np.Float64(20)
-    target_pub.publish(real_final_pos)
+    final_pos__.pose.position.x=np.float64(real_final_pos[0])
+    final_pos__.pose.position.y=np.float64(real_final_pos[1])
+    final_pos__.pose.position.z=np.float64(20)
+    target_pub.publish(final_pos__)
 
     for i in range(100):
-        final_number=str(most_common_four_strings(num_list))
+        # final_number = String()
+        final_number = str(most_common_four_strings(num_list))
         result_pub.publish(final_number)
     
     with open(f'/home/amov/Desktop/well{folder_name}/output.txt', 'a') as file:

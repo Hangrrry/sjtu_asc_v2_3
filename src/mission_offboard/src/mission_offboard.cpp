@@ -23,6 +23,7 @@
 #include <iostream>
 #include <ctime>
 #include <string>
+#include <map>
 #include <vector>
 #include <serial/serial.h>
 #include <time.h>
@@ -111,6 +112,33 @@ void rcin_sb(const mavros_msgs::RCIn::ConstPtr &msg)
 {
 	rcin = *msg;
 }
+void final_num_sb(const boost::shared_ptr<const std_msgs::String>& msg)
+{
+	std::map<char, std::string> keyboard_map;
+	keyboard_map['1'] = "Q";
+	keyboard_map['2'] = "W";
+	keyboard_map['3'] = "E";
+	keyboard_map['4'] = "R";
+	keyboard_map['5'] = "T";
+	keyboard_map['6'] = "Y";
+	keyboard_map['7'] = "U";
+	keyboard_map['8'] = "I";
+	keyboard_map['9'] = "O";
+	keyboard_map['0'] = "P";
+	keyboard_map[','] = ",";
+	keyboard_map['['] = "[";
+	keyboard_map[']'] = "]";
+	keyboard_map[' '] = " ";
+
+	std::string port = "/dev/ttyUSB1"; // 根据实际情况修改串口设备号
+	int baudrate = 9600;
+	serial::Serial serialPort(port, baudrate, serial::Timeout::simpleTimeout(1000));
+	const std::string& msg_data = msg->data;
+
+	for(int i = 0; i < msg_data.length(); i++){
+		serialPort.write(keyboard_map[msg_data[i]]);
+	}
+}
 
 // 初始化串口，用于与外部设备通信，控制舵机
 std::string port = "/dev/ttyUSB1"; // 根据实际情况修改串口设备号
@@ -129,7 +157,7 @@ int main(int argc, char **argv)
 	serialPort.write("@###");
 	serialPort.write("70a");
 
-	float x = -10, y = 27.5;
+	float x = -4.8, y = 30.6;
 
 	// std::cout << "pose.x: ";
 	// std::cin >> x;
@@ -193,6 +221,7 @@ int main(int argc, char **argv)
 	ros::Subscriber plane_mav_alt = nh.subscribe<mavros_msgs::Altitude>("/mavros/altitude", 10, mav_alt_sb);
 	ros::Subscriber plane_rel_alt = nh.subscribe<std_msgs::Float64>("/mavros/global_position/rel_alt", 10, rel_alt_sb);
 	ros::Subscriber plane_hud = nh.subscribe<mavros_msgs::VFR_HUD>("mavros_msgs/VFR_HUD", 10, hud_sb);
+	ros::Subscriber num_sub = nh.subscribe<std_msgs::String>("final_result", 10, final_num_sb);
 	ros::Publisher vision_stop_pub = nh.advertise<std_msgs::Float64>("vision_stop_flag", 10);
 	ros::Publisher target_pos_pub = nh.advertise<geometry_msgs::PoseStamped>("/mavros/setpoint_position/local", 10);
 	ros::Publisher send_num_pub=nh.advertise<std_msgs::Float64>("send_topic", 10);
@@ -256,7 +285,7 @@ int main(int argc, char **argv)
 	{
 		std::cout << "waiting to enter  .current=" << current_state.mode << "\n";
 		ros::spinOnce();
-		if (arco_num<2){
+		if (arco_num<1){
 			serialPort.write("ARCO");
 
 		}
@@ -361,7 +390,7 @@ int main(int argc, char **argv)
 
 			time(&timep2);
 
-			if (wp.wp_seq >= 5)
+			if (wp.wp_seq == 5)
 			{
 				std_msgs::Float64 vision_flag;
 				vision_flag.data = 666.666;
@@ -388,7 +417,7 @@ int main(int argc, char **argv)
 			distance = sqrt((local_pos.pose.position.x - target.pose.position.x) * (local_pos.pose.position.x - target.pose.position.x) + (local_pos.pose.position.y - target.pose.position.y) * (local_pos.pose.position.y - target.pose.position.y));
 			time(&timep3);
 
-			if (distance > 30)
+			if (distance > 33)
 			{
 				data << "now distance >37\n";
 				target_pos_pub.publish(target);
